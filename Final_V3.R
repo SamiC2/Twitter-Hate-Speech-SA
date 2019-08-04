@@ -22,6 +22,8 @@ library(e1071)
 library(ggplot2)
 library(caret)
 library(tree)
+library(party)
+library(class)
 
 set.seed(1)
 
@@ -36,9 +38,16 @@ data(stop_words)
 mydf_v3_1 = readr::read_csv('hate.speech.csv') #for sentiment analysis
 mydf_v3_2 = readr::read_csv('hate.speech.csv') #for entropy and tf
 
+
+
+
+########################################################################################################
 ####################################################
-# PART ONE (A): SENTIMENT ANALYSIS
+# PART ONE (A): SENTIMENT ANALYSIS######################################################################
 ####################################################
+########################################################################################################
+
+
 
 
 ####################################################
@@ -63,9 +72,15 @@ for(i in 1:nrow(mydf_v3_1)){
   }
 }
 
+
+
+########################################################################################################
 ####################################################
-## PART ONE (B): ENTROPY SECTION
+## PART ONE (B): ENTROPY SECTION########################################################################
 ####################################################
+########################################################################################################
+
+
 
 ####################################################
 ## get rid of stop words
@@ -87,13 +102,21 @@ freq[is.na(freq)] = 0
 
 mydf_v3_1$entropy_score = apply(mydf_v3_1,1,function(x,y){get_entropy_sentence(x[3], freq)})
 
+
+
+########################################################################################################
 ####################################################
-## PART TWO: tf_idf section
+## PART TWO: TF_IDF_SECTION#############################################################################
 ####################################################
+########################################################################################################
+
+
+
 
 ####################################################
 ##tidy the tweets for tf calculation as per tidy3 lab
 ####################################################
+
 tweet_words = mydf_v3_2 %>% unnest_tokens(word, tweet_text) %>% count(tweet_id, word, sort=T) %>% ungroup()
 
 total_words = tweet_words %>% group_by(tweet_id) %>% summarize(total = sum(n))
@@ -119,9 +142,14 @@ tfidf_words = tfidf_words %>% group_by(tweet_id) %>% mutate(total_tf_idf = sum(t
 
 tfidf_words = tfidf_words %>% group_by(tweet_id) %>% slice(1) %>% ungroup()
 
+
+
+########################################################################################################
 ####################################################
-## PART THREE: SVM AND 10FOLD ANALYSIS
+## PART THREE (A): SVM RADIAL BUILDING##################################################################
 ####################################################
+########################################################################################################
+
 
 
 ####################################################
@@ -171,18 +199,20 @@ y = data.frame(y)
 mymodel_set1 = svm(y~., data = train1, kernel = "radial", gamma = 1, cost = 1)
 
 ####################################################
-##Find the best gamma and cost:
+##Find the best gamma and cost: FIRST SET
 ####################################################
+
 tune.out = tune(svm, y~., data = train1, kernel = "radial", ranges = list(cost = 10^(-1:2), gamma = c(0.5, 1:4)))
 
 ####################################################
-##Summary state and tuning
+##Summary state and tuning FIRST SET
 ####################################################
+
 summary(tune.out)
 
 ypred = predict(tune.out$best.model, newdata = test1)
 
-table(predict = ypred, truth = test1$y)
+result1 = table(predict = ypred, truth = test1$y)
 
 ####################################################
 ##SVM fitting, second set of features
@@ -193,33 +223,154 @@ mymodel_set2 = svm(y~., data = train2, kernel = "radial", gamma = 1, cost = 1)
 ####################################################
 ##Find the best gamma and cost: SECOND SET
 ####################################################
+
 tune.out2 = tune(svm, y~., data = train2, kernel = "radial", ranges = list(cost = 10^(-1:2), gamma = c(0.5, 1:4)))
 
 ####################################################
 ##Summary state and tuning SECOND SET
 ####################################################
+
 summary(tune.out2)
 
 ypred2 = predict(tune.out2$best.model, newdata = test2)
 
-table(predict = ypred, truth = test2$y)
-
-####################################################
-##Now using another method of building a model, kNN
-####################################################
+result2 = table(predict = ypred, truth = test2$y)
 
 
 ####################################################
-##PART FOUR: 10FOLD CROSS VALIDATION
+##Plotting of SVM results
 ####################################################
 
+
+
+
+########################################################################################################
+####################################################
+##PART THREE (B): KNN BUILDING #########################################################################
+####################################################
+########################################################################################################
+
+
+
+####################################################
+#make the knn datasets
+####################################################
+
+knn_set1 = data_me1
+knn_set2 = data_me2
+
+colnames(knn_set1) = c("ID","text","sentiment","score","y")
+colnames(knn_set2) = c("ID","text", "tfidf","y")
+
+####################################################
+#factorize the dependent variable, or speech sentiment
+####################################################
+
+knn_set1$y = factor(knn_set1$y)
+knn_set2$y = factor(knn_set2$y)
+
+####################################################
+#normalize numeric variables
+####################################################
+
+numerics_var = sapply(knn_set1, is.numeric)
+knn_set1[numerics_var] = lapply(knn_set1[numerics_var], scale)
+
+knn_set2$tfidf = lapply(knn_set2$tfidf, scale)
+
+####################################################
+#get only independent variables
+####################################################
+
+ind_vars1 = c("sentiment", "score")
+knn_sub1 = knn_set1[ind_vars1]
+
+knn_sub2 = knn_set2["tfidf"]
+
+####################################################
+#predict on set of about 1000 observations
+####################################################
+
+set.seed(223)
+ind = 1:100
+
+####################################################
+#KNN First Feature Set
+####################################################
+
+knn_train1 = knn_sub1[-ind,]
+knn_test1 = knn_sub1[ind,]
+
+knn_sentiment_train1 = knn_set1$y[-ind]
+knn_sentiment_test1 = knn_set1$y[ind]
+
+knn.1set1 = knn(knn_train1, knn_test1, knn_sentiment_train1, k=1)
+knn.5set1 = knn(knn_train1, knn_test1, knn_sentiment_train1, k=5)
+knn.20set1 = knn(knn_train1, knn_test1, knn_sentiment_train1, k=20)
+
+####################################################
+#calc correct classification
+####################################################
+
+correc1_set1 = 100 * sum(knn_sentiment_test1 = knn.1) / 100
+correc5_set1 = 100 * sum(knn_sentiment_test1 = knn.5) / 100
+correc20_set1 = 100 * sum(knn_sentiment_test1 = knn.20) / 100
+
+####################################################
+#KNN Second Feature Set
+####################################################
+
+knn_train2 = knn_sub2[-ind,]
+knn_test2 = knn_sub2[ind,]
+
+knn_sentiment_train2 = knn_set2$y[-ind]
+knn_sentiment_test2 = knn_set2$y[ind]
+
+knn.1set2 = knn(knn_train2, knn_test2, knn_sentiment_train2, k=1)
+knn.5set2 = knn(knn_train2, knn_test2, knn_sentiment_train2, k=5)
+knn.20set2 = knn(knn_train2, knn_test2, knn_sentiment_train2, k=20)
+
+####################################################
+#calc correct classification
+####################################################
+
+correc1_set2 = 100 * sum(knn_sentiment_test2 = knn.1) / 100
+correc5_set2 = 100 * sum(knn_sentiment_test2 = knn.5) / 100
+correc20_set2 = 100 * sum(knn_sentiment_test2 = knn.20) / 100
+
+####################################################
+#PLOTTING KNN MODEL
+####################################################
+
+
+
+
+
+
+########################################################################################################
+####################################################
+##PART FOUR: 10FOLD CROSS VALIDATION####################################################################
+####################################################
+########################################################################################################
+
+
+
+####################################################
 #10fold fold building up
+####################################################
+
 K = 10
 
+####################################################
 # createFolds for speech sentiment to predict
-Folds = createFolds(y,k=K)
+####################################################
 
+Folds = createFolds(mydf_v3_2$speech,k=K)
+
+####################################################
 # Precision, Recall and F1 null vectors for now
+####################################################
+
 pre.yes = 
   rec.yes =
   f1.yes  =
@@ -227,44 +378,65 @@ pre.yes =
   rec.no  =
   f1.no   = NULL
 
+####################################################
 # confusion matrix is initially empty as well
+####################################################
 
 c.matrix = NULL
 
-
+####################################################
 # For each fold (observation)
 # 1. separate training and testing
 # 2. train the model
 # 3. predict
 # 4. collect the performance in the confusion matrix
+####################################################
+
+train_fold = knn_set1
+test_fold = knn_set2
+
+####################################################
+#FIRST SET 
+####################################################
 
 for(fold in Folds)
 {
+  ####################################################
   # current fold for testing
   # remainder for training
+  ####################################################
   
-  training = train1[fold,]
-  testing  = test1[fold,]
+  training = train1_fold[fold,]
+  testing  = test1_fold[fold,]
   
+  
+  ####################################################
   # train the tree and fit the model
+  ####################################################
   
-  the.tree = tree(y~., training)
+  the.tree = tree(y~.-text, data=training)
   cv.tree  = cv.tree(the.tree, FUN=prune.misclass)
   index.best  = which.min(cv.tree$dev)
   best.size   = cv.tree$size[index.best]
   pruned.tree = prune.misclass(the.tree,best=best.size)
   
+  ####################################################
   # test the tree (predict)
+  ####################################################
   
   pred = predict(pruned.tree, testing, type="class")
   
+  ####################################################
   # update the confusion matrix
+  ####################################################
   
   c.matrix = table(pred, testing$y)
   
+  ####################################################
   # compute the performance metrics (Precision, recall, F1) for each class
   # add to the proper vector that will be used
   # later for consolidation
+  ####################################################
   
   pre.yes = c(pre.yes, precision(c.matrix, relevant = "Yes"))
   rec.yes = c(pre.yes,    recall(c.matrix, relevant = "Yes"))
@@ -275,11 +447,14 @@ for(fold in Folds)
   f1.no  = c(pre.no,    F_meas(c.matrix, relevant = "No"))
 }
 
+####################################################
 # Now let's build the data frame with the results
 # we consolidate the results by computing
 #  - mean 
 #  - confidence interval (error margin)
 # for each metric
+####################################################
+
 results1 = data.frame(
   ci(pre.yes), 
   ci(rec.yes), 
@@ -296,10 +471,11 @@ results1 = cbind(
   Metric=rep(c("Precision","Recall","F1"),2),
   results)
 
-
+####################################################
 # Let's reorder the factor in column Metric
 # so they are plotted in the order Precision, Recall, F1
 # otherwise it will be the current (aphabetical) order
+####################################################
 
 results1$Metric = factor(results$Metric, levels = c("Precision", "Recall","F1"))
 
@@ -309,7 +485,10 @@ results1$Metric = factor(results$Metric, levels = c("Precision", "Recall","F1"))
 ##Repeat CV10F for second set of feautres
 ####################################################
 
+####################################################
 # Precision, Recall and F1 null vectors for now
+####################################################
+
 pre.yes = 
   rec.yes =
   f1.yes  =
@@ -317,16 +496,19 @@ pre.yes =
   rec.no  =
   f1.no   = NULL
 
+####################################################
 # confusion matrix is initially empty as well
+####################################################
 
 c.matrix = NULL
 
 for(fold in Folds)
 {
-  training = data_me2[-fold,]
-  testing  = data_me2[fold,]
-  
+  training = train2_fold[fold,]
+  testing  = test2_fold[fold,]
+  ####################################################
   # train the tree and fit the model
+  ####################################################
   
   the.tree = tree(y~., training)
   cv.tree  = cv.tree(the.tree, FUN=prune.misclass)
@@ -334,17 +516,23 @@ for(fold in Folds)
   best.size   = cv.tree$size[index.best]
   pruned.tree = prune.misclass(the.tree,best=best.size)
   
+  ####################################################
   # test the tree (predict)
+  ####################################################
   
   pred = predict(pruned.tree, testing, type="class")
   
+  ####################################################
   # update the confusion matrix
+  ####################################################
   
   c.matrix = table(pred, testing$y)
   
+  ####################################################
   # compute the performance metrics (Precision, recall, F1) for each class
   # add to the proper vector that will be used
   # later for consolidation
+  ####################################################
   
   pre.yes = c(pre.yes, precision(c.matrix, relevant = "Yes"))
   rec.yes = c(pre.yes,    recall(c.matrix, relevant = "Yes"))
@@ -355,11 +543,14 @@ for(fold in Folds)
   f1.no  = c(pre.no,    F_meas(c.matrix, relevant = "No"))
 }
 
+####################################################
 # Now let's build the data frame with the results
 # we consolidate the results by computing
 #  - mean 
 #  - confidence interval (error margin)
 # for each metric
+####################################################
+
 results2 = data.frame(
   ci(pre.yes), 
   ci(rec.yes), 
@@ -376,18 +567,31 @@ results2 = cbind(
   Metric=rep(c("Precision","Recall","F1"),2),
   results)
 
-
+####################################################
 # Let's reorder the factor in column Metric
 # so they are plotted in the order Precision, Recall, F1
 # otherwise it will be the current (aphabetical) order
+####################################################
 
 results2$Metric = factor(results$Metric, levels = c("Precision", "Recall","F1"))
 
+####################################################
+####################################################
+#PLOTTING WITH ROCR AND THE RESULTS
+####################################################
+####################################################
 
 
 
 
 
 
+####################################################
+####################################################
+####################################################
 
+#### END OF PROGRAM
 
+####################################################
+####################################################
+####################################################
