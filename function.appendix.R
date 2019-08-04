@@ -15,6 +15,8 @@ library(tm)
 library(gmodels)
 library(e1071)
 
+source('shannon.entropy.R')
+
 afinn_list = get_sentiments("afinn")
 
 
@@ -48,3 +50,38 @@ get_sentence_score = function(sentence){
   }
   return (sentence_score)
 }
+
+####################################################
+##function to get Entropy word score
+####################################################
+
+get_entropy_word = function(word, freq){
+  word = str_to_lower(word)
+  if(word %in% freq$word){
+    score = shannon.entropy(freq$probability[freq$word==word])
+    return (score)
+  }
+  return (NULL)
+}
+
+####################################################
+##function to get Entropy Total Score
+####################################################
+
+get_entropy_sentence = function(sentence, freq){
+  entropy_score = 0
+  words = strsplit(removePunctuation(as.character(sentence)), " ")[[1]]
+  
+  for(word in words)
+  {
+    word_score = get_entropy_word(word, freq)
+    if(!is.null(word_score))
+    {
+      entropy_score = entropy_score + word_score
+    }
+  }
+  return (entropy_score)
+}
+
+
+

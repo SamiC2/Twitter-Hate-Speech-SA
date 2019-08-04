@@ -17,7 +17,11 @@ library(ggplot2)
 library(sentimentr)
 library(tm)
 library(gmodels)
+library(caTools)
 library(e1071)
+library(ggplot2)
+library(caret)
+library(tree)
 
 set.seed(1)
 
@@ -36,38 +40,6 @@ mydf_v3_2 = readr::read_csv('hate.speech.csv') #for entropy and tf
 # PART ONE (A): SENTIMENT ANALYSIS
 ####################################################
 
-afinn_list = get_sentiments("afinn")
-
-####################################################
-##function to get word score
-####################################################
-
-get_word_score = function(word){
-  word = str_to_lower(word)
-  if(word %in% afinn_list$word){
-    return (afinn_list$score[afinn_list$word==word])
-  }
-  return (NULL)
-}
-
-####################################################
-##function to get sentence score
-####################################################
-
-get_sentence_score = function(sentence){
-  sentence_score = 0
-  words = strsplit(removePunctuation(as.character(sentence)), " ")[[1]]
-  
-  for(word in words)
-  {
-    word_score = get_word_score(word)
-    if(!is.null(word_score))
-    {
-      sentence_score = sentence_score + word_score
-    }
-  }
-  return (sentence_score)
-}
 
 ####################################################
 ##initialize table with standard vals for sentiment detection
@@ -102,27 +74,19 @@ for(i in 1:nrow(mydf_v3_1)){
 clean_tweets = mydf_v3_2 %>% unnest_tokens(word, tweet_text) %>% filter(!str_detect(word, "[0-9]")) %>% anti_join(stop_words) %>% ungroup()
 
 ####################################################
-##get frequencies as per entropy.lab.r
+##get frequencies as per entropy.lab.r 
 ####################################################
 
-freq = clean_tweets %>% group_by(tweet_id) %>% mutate(word = str_extract(word, "[a-z']+")) %>% count(word, sort = T) %>% ungroup() %>% mutate(probability = n / sum(n)) %>%  select(-n) %>% spread(tweet_id, probability)
-
-
-####################################################
-##replace NAs with 0
-####################################################
+freq = clean_tweets %>% group_by(tweet_id, speech) %>% mutate(word = str_extract(word, "[a-z']+")) %>% count(word, sort = T) %>% ungroup() %>% mutate(probability = n / sum(n)) %>% select(-n) 
 
 freq[is.na(freq)] = 0
 
 ####################################################
-##apply shannon.entropy function to the frequencies/probabilities
+##apply shannon.entropy function to the frequencies/probabilities, with my functions
 ####################################################
 
-freq = freq %>% group_by(tweet_id) %>% mutate(entropyHate = shannon.entropy(hate))
-freq = freq %>% group_by(tweet_id) %>% mutate(entropyOffensive = shannon.entropy(offensive))
-freq = freq %>% group_by(tweet_id) %>% mutate(entropyRegular = shannon.entropy(regular))
+mydf_v3_1$entropy_score = apply(mydf_v3_1,1,function(x,y){get_entropy_sentence(x[3], freq)})
 
-freq_2 = unique(freq %>% group_by(tweet_id))
 ####################################################
 ## PART TWO: tf_idf section
 ####################################################
@@ -151,51 +115,279 @@ tfidf_words = tweet_words %>% bind_tf_idf(word, tweet_id, n)
 tfidf_words$tf = tf_words$tf
 tfidf_words = tfidf_words %>% mutate(tfidf_mine = tf * idf)
 
+tfidf_words = tfidf_words %>% group_by(tweet_id) %>% mutate(total_tf_idf = sum(tfidf_mine)) %>% ungroup()
+
+tfidf_words = tfidf_words %>% group_by(tweet_id) %>% slice(1) %>% ungroup()
+
 ####################################################
 ## PART THREE: SVM AND 10FOLD ANALYSIS
 ####################################################
 
-#set1 = data.frame(mydf_v3_1, mydf_v3_2) = x1
-#set2 = data.frame(tfidf_tweets) = x2
-#load the inputs, these should be matrices
-x = (0) #feature set i want to train, so I would use one x for sentiment+entropy, and one for tfidf
 
-#the output is the thing I am comparing against, the speech
+####################################################
+##build the 2 feature sets
+####################################################
+
+set1 = data.frame(mydf_v3_1$tweet_id, mydf_v3_1$tweet_text, mydf_v3_1$sentiment_decision, mydf_v3_1$entropy_score)
+
+####################################################
+#order the mydf so that tweet_ids and tweet_text match to the tfidf calculated
+####################################################
+
+mydf_v3_2 = mydf_v3_2[order(mydf_v3_2$tweet_id),]
+
+set2 = data.frame(mydf_v3_2$tweet_id, mydf_v3_2$tweet_text, tfidf_words$total_tf_idf)
+
+####################################################
+##create the output set, then make the dataframes
+####################################################
+
 y = mydf_v3_2$speech
 
-#put the data together into one dataframe
+data_me1 = data.frame(x=set1, y=as.factor(y))
+data_me2 = data.frame(x=set2, y=as.factor(y))
 
-data_me = data.frame(x=x, y=as.factor(y))
-
+####################################################
 #split the data into test and train
-#unsure
+####################################################
 
-train = sample(200,100) #what exactly needs to be here
+set.seed(149)
 
-#fit with svm function
+sample1 = sample.int(n = nrow(data_me1), size = floor(0.8*nrow(data_me1)), replace=F)
+sample2 = sample.int(n = nrow(data_me2), size = floor(0.8*nrow(data_me2)), replace=F)
 
-svm.poly = svm(y~., data = data_me[train,], kernel = "polynomial", gamma = 1, cost = 1)
+train1 = data_me1[sample1,]
+test1 = data_me1[-sample1,]
 
-# #Find the best gamma and cost:
+train2 = data_me2[sample2,]
+test2 = data_me2[-sample2,]
 
-tune.out = tune(svm,y~.,data = data_me[train,],kernel = "polynomial", ranges = list(cost = 10^(-1:2), gamma = c(0.5, 1:4)))
+####################################################
+#fit with svm function - first set of feautres
+####################################################
 
+y = data.frame(y)
+
+mymodel_set1 = svm(y~., data = train1, kernel = "radial", gamma = 1, cost = 1)
+
+####################################################
+##Find the best gamma and cost:
+####################################################
+tune.out = tune(svm, y~., data = train1, kernel = "radial", ranges = list(cost = 10^(-1:2), gamma = c(0.5, 1:4)))
+
+####################################################
+##Summary state and tuning
+####################################################
 summary(tune.out)
 
-ypred = predict(tune.out$best.model, newdata = data_me[-train,])
+ypred = predict(tune.out$best.model, newdata = test1)
 
-table(predict = ypred, truth = data_me[-train,"y"])
+table(predict = ypred, truth = test1$y)
 
-#fit training data to svm function
-svm.poly = svm(y~.,data=data_me[train,],kernel = "polynomial", degree=2, cost=1)
+####################################################
+##SVM fitting, second set of features
+####################################################
 
-tune.out=tune(svm,y~.,data=data_me[train,],kernel="polynomial",ranges=list(cost=10^(-1:2),degree=(1:4)))
-summary(tune.out)
-ypred=predict(tune.out$best.model,newdata=data_me[-train,])
-table(predict=ypred,truth=data_me[-train,"y"])
+mymodel_set2 = svm(y~., data = train2, kernel = "radial", gamma = 1, cost = 1)
+
+####################################################
+##Find the best gamma and cost: SECOND SET
+####################################################
+tune.out2 = tune(svm, y~., data = train2, kernel = "radial", ranges = list(cost = 10^(-1:2), gamma = c(0.5, 1:4)))
+
+####################################################
+##Summary state and tuning SECOND SET
+####################################################
+summary(tune.out2)
+
+ypred2 = predict(tune.out2$best.model, newdata = test2)
+
+table(predict = ypred, truth = test2$y)
+
+####################################################
+##Now using another method of building a model, kNN
+####################################################
 
 
 ####################################################
-## PART FOUR: CROSS VALIDATION
+##PART FOUR: 10FOLD CROSS VALIDATION
 ####################################################
+
+#10fold fold building up
+K = 10
+
+# createFolds for speech sentiment to predict
+Folds = createFolds(y,k=K)
+
+# Precision, Recall and F1 null vectors for now
+pre.yes = 
+  rec.yes =
+  f1.yes  =
+  pre.no  =
+  rec.no  =
+  f1.no   = NULL
+
+# confusion matrix is initially empty as well
+
+c.matrix = NULL
+
+
+# For each fold (observation)
+# 1. separate training and testing
+# 2. train the model
+# 3. predict
+# 4. collect the performance in the confusion matrix
+
+for(fold in Folds)
+{
+  # current fold for testing
+  # remainder for training
+  
+  training = train1[fold,]
+  testing  = test1[fold,]
+  
+  # train the tree and fit the model
+  
+  the.tree = tree(y~., training)
+  cv.tree  = cv.tree(the.tree, FUN=prune.misclass)
+  index.best  = which.min(cv.tree$dev)
+  best.size   = cv.tree$size[index.best]
+  pruned.tree = prune.misclass(the.tree,best=best.size)
+  
+  # test the tree (predict)
+  
+  pred = predict(pruned.tree, testing, type="class")
+  
+  # update the confusion matrix
+  
+  c.matrix = table(pred, testing$y)
+  
+  # compute the performance metrics (Precision, recall, F1) for each class
+  # add to the proper vector that will be used
+  # later for consolidation
+  
+  pre.yes = c(pre.yes, precision(c.matrix, relevant = "Yes"))
+  rec.yes = c(pre.yes,    recall(c.matrix, relevant = "Yes"))
+  f1.yes  = c(pre.yes,    F_meas(c.matrix, relevant = "Yes"))
+  
+  pre.no = c(pre.no, precision(c.matrix, relevant = "No"))
+  rec.no = c(pre.no,    recall(c.matrix, relevant = "No"))
+  f1.no  = c(pre.no,    F_meas(c.matrix, relevant = "No"))
+}
+
+# Now let's build the data frame with the results
+# we consolidate the results by computing
+#  - mean 
+#  - confidence interval (error margin)
+# for each metric
+results1 = data.frame(
+  ci(pre.yes), 
+  ci(rec.yes), 
+  ci(f1.yes),
+  ci(pre.no), 
+  ci(rec.no), 
+  ci(f1.no)
+)
+
+results1 = data.frame(t(results),row.names=NULL)
+
+results1 = cbind(
+  Class=c(rep("Yes",3),rep("No",3)),
+  Metric=rep(c("Precision","Recall","F1"),2),
+  results)
+
+
+# Let's reorder the factor in column Metric
+# so they are plotted in the order Precision, Recall, F1
+# otherwise it will be the current (aphabetical) order
+
+results1$Metric = factor(results$Metric, levels = c("Precision", "Recall","F1"))
+
+
+
+####################################################
+##Repeat CV10F for second set of feautres
+####################################################
+
+# Precision, Recall and F1 null vectors for now
+pre.yes = 
+  rec.yes =
+  f1.yes  =
+  pre.no  =
+  rec.no  =
+  f1.no   = NULL
+
+# confusion matrix is initially empty as well
+
+c.matrix = NULL
+
+for(fold in Folds)
+{
+  training = data_me2[-fold,]
+  testing  = data_me2[fold,]
+  
+  # train the tree and fit the model
+  
+  the.tree = tree(y~., training)
+  cv.tree  = cv.tree(the.tree, FUN=prune.misclass)
+  index.best  = which.min(cv.tree$dev)
+  best.size   = cv.tree$size[index.best]
+  pruned.tree = prune.misclass(the.tree,best=best.size)
+  
+  # test the tree (predict)
+  
+  pred = predict(pruned.tree, testing, type="class")
+  
+  # update the confusion matrix
+  
+  c.matrix = table(pred, testing$y)
+  
+  # compute the performance metrics (Precision, recall, F1) for each class
+  # add to the proper vector that will be used
+  # later for consolidation
+  
+  pre.yes = c(pre.yes, precision(c.matrix, relevant = "Yes"))
+  rec.yes = c(pre.yes,    recall(c.matrix, relevant = "Yes"))
+  f1.yes  = c(pre.yes,    F_meas(c.matrix, relevant = "Yes"))
+  
+  pre.no = c(pre.no, precision(c.matrix, relevant = "No"))
+  rec.no = c(pre.no,    recall(c.matrix, relevant = "No"))
+  f1.no  = c(pre.no,    F_meas(c.matrix, relevant = "No"))
+}
+
+# Now let's build the data frame with the results
+# we consolidate the results by computing
+#  - mean 
+#  - confidence interval (error margin)
+# for each metric
+results2 = data.frame(
+  ci(pre.yes), 
+  ci(rec.yes), 
+  ci(f1.yes),
+  ci(pre.no), 
+  ci(rec.no), 
+  ci(f1.no)
+)
+
+results2 = data.frame(t(results),row.names=NULL)
+
+results2 = cbind(
+  Class=c(rep("Yes",3),rep("No",3)),
+  Metric=rep(c("Precision","Recall","F1"),2),
+  results)
+
+
+# Let's reorder the factor in column Metric
+# so they are plotted in the order Precision, Recall, F1
+# otherwise it will be the current (aphabetical) order
+
+results2$Metric = factor(results$Metric, levels = c("Precision", "Recall","F1"))
+
+
+
+
+
+
+
+
 
