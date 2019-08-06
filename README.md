@@ -12,6 +12,5 @@ RStudio 3.22 Used
 ###**"An Aggie does not lie, cheat, or steal, nor tolerate those who do."**
 
 
-######**_Sami Chowdhury
-CSCE + PETE Graduate 2019
-_**
+#**_Sami Chowdhury_**
+##**_CSCE + PETE Graduate 2019_**
