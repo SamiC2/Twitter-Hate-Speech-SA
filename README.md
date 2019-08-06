@@ -9,8 +9,9 @@ Project build as a final project for CSCE 489 - Special Topics - Social Network 
 RStudio 3.22 Used
 
 
-"An Aggie does not lie, cheat, or steal, nor tolerate those who do."
+###**"An Aggie does not lie, cheat, or steal, nor tolerate those who do."**
 
 
-Sami Chowdhury
+######**_Sami Chowdhury
 CSCE + PETE Graduate 2019
+_**
