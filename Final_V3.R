@@ -24,6 +24,8 @@ library(caret)
 library(tree)
 library(party)
 library(class)
+library(MASS)
+library(nnet)
 
 set.seed(145)
 
@@ -239,19 +241,11 @@ ypred2 = predict(tune.out2$best.model, newdata = test2)
 result2 = table(predict = ypred, truth = test2$y)
 
 
-####################################################
-##Plotting of SVM results
-####################################################
-
-
-
-
 ########################################################################################################
 ####################################################
 ##PART THREE (B): KNN BUILDING #########################################################################
 ####################################################
 ########################################################################################################
-
 
 
 ####################################################
@@ -384,6 +378,74 @@ colnames(knn_table_set2) = c("Accuracy for k=1", "Accuracy for k=5", "Accuracy f
 
 ########################################################################################################
 ####################################################
+##PART THREE (C): NNET BUILDING ########################################################################
+####################################################
+########################################################################################################
+
+####################################################
+#use knn_set1, knn_set2, since this requires normalized data, fixing the data all over
+####################################################
+
+nnet_ds1 = data.frame(knn_set1$senty, knn_set1$score, knn_set1$y, stringsAsFactors = FALSE)
+nnet_ds2 = data.frame(knn_set2$tfidf, knn_set2$y, stringsAsFactors = FALSE)
+
+colnames(nnet_ds1) = c("senty", "score", "y")
+colnames(nnet_ds2) = c("tfidf", "y")
+
+knx = scale(nnet_ds2$tfidf, center=TRUE,scale=TRUE)
+nnet_ds2$tfidf_scaled = knx
+
+nnet_ds1$y_new = 0
+for(i in 1:nrow(nnet_ds1)){
+  if(as.character(nnet_ds1$y[i])=="hate")
+  {
+    nnet_ds1$y_new[i] = 1
+  }
+  if(as.character(nnet_ds1$y[i])=="offensive")
+  {
+    nnet_ds1$y_new[i] = 0.5
+  }
+}
+
+nnet_ds2$y_new = 0
+for(i in 1:nrow(nnet_ds2)){
+  if(as.character(nnet_ds2$y[i])=="hate")
+  {
+    nnet_ds2$y_new[i] = 1
+  }
+  if(as.character(nnet_ds2$y[i])=="offensive")
+  {
+    nnet_ds2$y_new[i] = 0.5
+  }
+}
+
+nnet_ds1$y =
+  nnet_ds2$y = 
+  nnet_ds2$tfidf = NULL
+
+ideal_set1 = class.ind(nnet_ds1$y_new)
+ideal_set2 = class.ind(nnet_ds2$y_new)
+
+
+####################################################
+#actual nnet part
+ind = 1:1000
+
+####################################################
+#using everything but the last column, model towards the last column, then pool into results table
+####################################################
+
+my_ann_set1 = nnet(nnet_ds1[-ind,-3], ideal_set1[-ind,], size = 10, softmax = TRUE)
+
+ann1_result = table(predict(my_ann_set1, nnet_ds1[ind,-3], type="class"), nnet_ds1[ind,]$y_new)
+
+my_ann_set2 = nnet(nnet_ds2[-ind,-2], ideal_set2[-ind,], size = 10, softmax = TRUE)
+
+ann2_result = table(predict(my_ann_set2, nnet_ds2[ind,-2], type = "class"),nnet_ds2[ind,]$y_new)
+
+
+########################################################################################################
+####################################################
 ##PART FOUR: 10FOLD CROSS VALIDATION####################################################################
 ####################################################
 ########################################################################################################
@@ -392,7 +454,93 @@ colnames(knn_table_set2) = c("Accuracy for k=1", "Accuracy for k=5", "Accuracy f
 #10fold fold building up
 ####################################################
 
+K = 10
 
+####################################################
+# createFolds for speech sentiment to predict
+####################################################
+
+Folds = cut(seq(1, nrow(mydf_v3_2)), breaks = K, labels = FALSE)
+
+fold_set1 = data.frame(data_me1, stringsAsFactors = FALSE)
+fold_set2 = data.frame(data_me2, stringsAsFactors = FALSE)
+
+colnames(fold_set1) = c("ID","text","sentiment","score","y")
+colnames(fold_set2) = c("ID","text", "tfidf","y")
+
+#set 1 svm error rate calculating
+cv10_svm_set1 = sapply(1:K, FUN = function(i){
+  testID = which(Folds == i, arr.ind = TRUE)
+  test = fold_set1[testID,]
+  train = fold_set1[-testID,]
+  svm = svm(y~sentiment + score, data = train, kernel = "radial", gamma = 3, cost = 10) #remember the best cost and gamma use
+  svm.pred = predict(svm, test)
+  svm.pred = data.frame(svm.pred)
+  estimate_svm = mean(svm.pred[,1] != test$y)
+  return(estimate_svm)
+})
+err_svm_set1 = mean(cv10_svm_set1) #gets error rate over the 10 fold calculations
+
+#set 2 svm error rate calculating
+cv10_svm_set2 = sapply(1:K, FUN = function(i){
+  testID = which(Folds == i, arr.ind = TRUE)
+  test = fold_set2[testID,]
+  train = fold_set2[-testID,]
+  svm = svm(y~tfidf, data = train, kernel = "radial", gamma = 0.5, cost = 0.1) #remember the best cost and gamma use
+  svm.pred = predict(svm, test)
+  svm.pred = data.frame(svm.pred)
+  estimate_svm = mean(svm.pred[,1] != test$y)
+  return(estimate_svm)
+})
+err_svm_set2 = mean(cv10_svm_set2)
+
+err_svm_df = data.frame(err_svm_set1, err_svm_set2)
+colnames(err_svm_df) = c("Error 10CV Set1", "Error 10CV Set2")
+
+#nnet tuning
+#online resource just says use tune.nnet
+
+tmodel_set1 = tune.nnet(y_new~senty+score, data = nnet_ds1, size = 1:10)
+summary(tmodel_set1)
+
+# best size is 1
+
+tmodel_set2 = tune.nnet(y_new~tfidf_scaled, data = nnet_ds2, size = 1:10)
+summary(tmodel_set2)
+
+#best size is 2
+
+
+#set1 nnet 10cv
+# cv10_nnet_set1 = sapply(1:K, FUN = function(i){
+#   testID = which(Folds == i, arr.ind = TRUE)
+#   test = nnet_ds1[testID,]
+#   train = nnet_ds1[-testID,]
+#   nnet = nnet(y_new~senty+score, data = nnet_ds1, size = 1) #remember the best cost and gamma use
+#   nnet.pred = predict(nnet, test)
+#   nnet.pred = data.frame(nnet.pred)
+#   estimate_svm = mean(nnet.pred[,1] != test$y_new)
+#   return(estimate_svm)
+# })
+# err_nnet_set1 = mean(cv10_nnet_set1)
+# 
+# #set1 nnet 10cv
+# cv10_nnet_set2 = sapply(1:K, FUN = function(i){
+#   testID = which(Folds == i, arr.ind = TRUE)
+#   test = nnet_ds2[testID,]
+#   train = nnet_ds2[-testID,]
+#   nnet = nnet(y_new~tfidf_scaled, data = nnet_ds2, size = 2) #remember the best cost and gamma use
+#   nnet.pred = predict(nnet, test)
+#   nnet.pred = data.frame(nnet.pred)
+#   estimate_svm = mean(nnet.pred[,1] != test$y_new)
+#   return(estimate_svm)
+# })
+# err_nnet_set2 = mean(cv10_nnet_set2)
+# 
+# err_nnet_df = data.frame(err_nnet_set1, err_nnet_set2)
+# colnames(err_nnet_df) = c("Error 10CV Set1", "Error 10CV Set2")
+
+#above returns odd values
 
 ####################################################
 ####################################################
@@ -400,7 +548,46 @@ colnames(knn_table_set2) = c("Accuracy for k=1", "Accuracy for k=5", "Accuracy f
 ####################################################
 ####################################################
 
+#7/13/19
+############################################
+#ROC CURVES
+############################################
 
+#The ROCR package can be used to produce ROC curves. First write a short function to plot an ROC curve
+#given a vector containing a numerical score for each observation, pred, and a vector containing the class label for each
+#observation, truth.
+
+library(ROCR)
+rocplot=function(pred,truth,...){ predob=prediction(pred,truth);
+perf=performance(predob,"tpr","fpr"); plot(perf,...)}
+
+#In order to obtain the fitted values for a given SVM model fit, we use decision.values=T when fitting svm(). Then
+#the predict() function will output the fitted values.
+
+svmfit.opt=svm(y~.,data=dat[train,],kernel="radial",gamma=2,cost=1,decision.values=T)
+fitted=attributes(predict(svmfit.opt,dat[train,],decision.values=T))$decision.values
+
+#Now we can produce the ROC plot.
+
+par(mfrow =c(1,2))
+rocplot(fitted,dat[train,"y"], main="Training Data")
+
+#SVM appears to be producing accurate predictions. By increasing gamma we can produce a more flexible fit and generate
+#further improvements in accuracy.
+
+svmfit.flex=svm(y~.,data=dat[train,],kernel="radial",gamma=50,cost=1,decision.values=T)
+fitted=attributes(predict(svmfit.flex,dat[train,],decision.values=T))$decision.values
+
+rocplot(fitted,dat[train,"y"],add=T,col="red")
+
+#These ROC curves are all on the training data. We are really more interested in the level of prediction accuracy on the test
+#data.
+
+fitted=attributes(predict(svmfit.opt,dat[-train,],decision.values=T))$decision.values
+rocplot(fitted,dat[-train,"y"],main="Test Data")
+
+fitted=attributes(predict(svmfit.flex,dat[-train,],decision.values=T))$decision.values
+rocplot(fitted,dat[-train,"y"],add=T,col="red"))
 
 
 
