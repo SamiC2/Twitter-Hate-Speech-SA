@@ -25,7 +25,7 @@ library(tree)
 library(party)
 library(class)
 
-set.seed(1)
+set.seed(145)
 
 source('shannon.entropy.R')
 source('function.appendix.R')
@@ -179,8 +179,6 @@ data_me2 = data.frame(x=set2, y=as.factor(y))
 #split the data into test and train
 ####################################################
 
-set.seed(149)
-
 sample1 = sample.int(n = nrow(data_me1), size = floor(0.8*nrow(data_me1)), replace=F)
 sample2 = sample.int(n = nrow(data_me2), size = floor(0.8*nrow(data_me2)), replace=F)
 
@@ -210,6 +208,8 @@ tune.out = tune(svm, y~., data = train1, kernel = "radial", ranges = list(cost =
 
 summary(tune.out)
 
+#after my first run of the tune.out, best performance: 0.6649233, cost 10, gamma 3
+
 ypred = predict(tune.out$best.model, newdata = test1)
 
 result1 = table(predict = ypred, truth = test1$y)
@@ -231,6 +231,8 @@ tune.out2 = tune(svm, y~., data = train2, kernel = "radial", ranges = list(cost 
 ####################################################
 
 summary(tune.out2)
+
+#best cost 0.1, gamma 0.5, perf 0.5835252
 
 ypred2 = predict(tune.out2$best.model, newdata = test2)
 
@@ -256,8 +258,8 @@ result2 = table(predict = ypred, truth = test2$y)
 #make the knn datasets
 ####################################################
 
-knn_set1 = data_me1
-knn_set2 = data_me2
+knn_set1 = data.frame(data_me1, stringsAsFactors = FALSE)
+knn_set2 = data.frame(data_me2, stringsAsFactors = FALSE)
 
 colnames(knn_set1) = c("ID","text","sentiment","score","y")
 colnames(knn_set2) = c("ID","text", "tfidf","y")
@@ -268,24 +270,43 @@ colnames(knn_set2) = c("ID","text", "tfidf","y")
 
 knn_set1$y = factor(knn_set1$y)
 knn_set2$y = factor(knn_set2$y)
+knn_set2$tfidf[is.na(knn_set2$tfidf)] = 0
 
 ####################################################
 #normalize numeric variables
 ####################################################
 
 numerics_var = sapply(knn_set1, is.numeric)
+
 knn_set1[numerics_var] = lapply(knn_set1[numerics_var], scale)
 
-knn_set2$tfidf = lapply(knn_set2$tfidf, scale)
+#knn can only allow booleans or numericas, convert sentiment decision to numericas
+
+knn_set1$senty = 0.5
+for(i in 1:nrow(knn_set1)){
+  if(as.character(knn_set1$sentiment[i])=="positive")
+  {
+    knn_set1$senty[i] = 1
+  }
+  if(as.character(knn_set1$sentiment[i])=="negative")
+  {
+    knn_set1$senty[i] = 0
+  }
+}
+
+#scale tfidfs serpeately since otherwise i get attributes returned
+knx = scale(knn_set2$tfidf, center=TRUE,scale=TRUE)
+
+knn_set2$tfidf_scaled = knx
 
 ####################################################
 #get only independent variables
 ####################################################
 
-ind_vars1 = c("sentiment", "score")
+ind_vars1 = c("senty", "score")
 knn_sub1 = knn_set1[ind_vars1]
 
-knn_sub2 = knn_set2["tfidf"]
+knn_sub2 = knn_set2$tfidf_scaled
 
 ####################################################
 #predict on set of about 1000 observations
@@ -312,9 +333,9 @@ knn.20set1 = knn(knn_train1, knn_test1, knn_sentiment_train1, k=20)
 #calc correct classification
 ####################################################
 
-correc1_set1 = 100 * sum(knn_sentiment_test1 = knn.1) / 100
-correc5_set1 = 100 * sum(knn_sentiment_test1 = knn.5) / 100
-correc20_set1 = 100 * sum(knn_sentiment_test1 = knn.20) / 100
+correc1_set1 = 100 * sum(knn_sentiment_test1 == knn.1set1) / 100
+correc5_set1 = 100 * sum(knn_sentiment_test1 == knn.5set1) / 100
+correc20_set1 = 100 * sum(knn_sentiment_test1 == knn.20set1) / 100
 
 ####################################################
 #KNN Second Feature Set
@@ -326,25 +347,39 @@ knn_test2 = knn_sub2[ind,]
 knn_sentiment_train2 = knn_set2$y[-ind]
 knn_sentiment_test2 = knn_set2$y[ind]
 
-knn.1set2 = knn(knn_train2, knn_test2, knn_sentiment_train2, k=1)
-knn.5set2 = knn(knn_train2, knn_test2, knn_sentiment_train2, k=5)
-knn.20set2 = knn(knn_train2, knn_test2, knn_sentiment_train2, k=20)
+knn.1set2 = knn(data.frame(knn_train2), data.frame(knn_test2), knn_sentiment_train2, k=1)
+knn.5set2 = knn(data.frame(knn_train2), data.frame(knn_test2), knn_sentiment_train2, k=5)
+knn.20set2 = knn(data.frame(knn_train2), data.frame(knn_test2), knn_sentiment_train2, k=20)
 
 ####################################################
 #calc correct classification
 ####################################################
 
-correc1_set2 = 100 * sum(knn_sentiment_test2 = knn.1) / 100
-correc5_set2 = 100 * sum(knn_sentiment_test2 = knn.5) / 100
-correc20_set2 = 100 * sum(knn_sentiment_test2 = knn.20) / 100
+correc1_set2 = 100 * sum(knn_sentiment_test2 == knn.1set2) / 100
+correc5_set2 = 100 * sum(knn_sentiment_test2 == knn.5set2) / 100
+correc20_set2 = 100 * sum(knn_sentiment_test2 == knn.20set2) / 100
 
 ####################################################
-#PLOTTING KNN MODEL
+#Pooling all knn results together
 ####################################################
 
 
+#how the classifications went
 
+knn_result_1set1 = table(knn.1set1, knn_sentiment_test1)
+knn_result_5set1 = table(knn.5set1, knn_sentiment_test1)
+knn_result_20set1 = table(knn.20set1, knn_sentiment_test1)
 
+knn_result_1set2 = table(knn.1set2, knn_sentiment_test2)
+knn_result_5set2 = table(knn.5set2, knn_sentiment_test2)
+knn_result_20set2 = table(knn.20set2, knn_sentiment_test2)
+
+#pooling the accuracies
+knn_table_set1 = data.frame(correc1_set1, correc5_set1, correc20_set1)
+colnames(knn_table_set1) = c("Accuracy for k=1", "Accuracy for k=5", "Accuracy for k=20")
+
+knn_table_set2 = data.frame(correc1_set2, correc5_set2, correc20_set2)
+colnames(knn_table_set2) = c("Accuracy for k=1", "Accuracy for k=5", "Accuracy for k=20")
 
 
 ########################################################################################################
@@ -353,227 +388,11 @@ correc20_set2 = 100 * sum(knn_sentiment_test2 = knn.20) / 100
 ####################################################
 ########################################################################################################
 
-
-
 ####################################################
 #10fold fold building up
 ####################################################
 
-K = 10
 
-####################################################
-# createFolds for speech sentiment to predict
-####################################################
-
-Folds = createFolds(mydf_v3_2$speech,k=K)
-
-####################################################
-# Precision, Recall and F1 null vectors for now
-####################################################
-
-pre.yes = 
-  rec.yes =
-  f1.yes  =
-  pre.no  =
-  rec.no  =
-  f1.no   = NULL
-
-####################################################
-# confusion matrix is initially empty as well
-####################################################
-
-c.matrix = NULL
-
-####################################################
-# For each fold (observation)
-# 1. separate training and testing
-# 2. train the model
-# 3. predict
-# 4. collect the performance in the confusion matrix
-####################################################
-
-train_fold = knn_set1
-test_fold = knn_set2
-
-####################################################
-#FIRST SET 
-####################################################
-
-for(fold in Folds)
-{
-  ####################################################
-  # current fold for testing
-  # remainder for training
-  ####################################################
-  
-  training = train1_fold[fold,]
-  testing  = test1_fold[fold,]
-  
-  
-  ####################################################
-  # train the tree and fit the model
-  ####################################################
-  
-  the.tree = tree(y~.-text, data=training)
-  cv.tree  = cv.tree(the.tree, FUN=prune.misclass)
-  index.best  = which.min(cv.tree$dev)
-  best.size   = cv.tree$size[index.best]
-  pruned.tree = prune.misclass(the.tree,best=best.size)
-  
-  ####################################################
-  # test the tree (predict)
-  ####################################################
-  
-  pred = predict(pruned.tree, testing, type="class")
-  
-  ####################################################
-  # update the confusion matrix
-  ####################################################
-  
-  c.matrix = table(pred, testing$y)
-  
-  ####################################################
-  # compute the performance metrics (Precision, recall, F1) for each class
-  # add to the proper vector that will be used
-  # later for consolidation
-  ####################################################
-  
-  pre.yes = c(pre.yes, precision(c.matrix, relevant = "Yes"))
-  rec.yes = c(pre.yes,    recall(c.matrix, relevant = "Yes"))
-  f1.yes  = c(pre.yes,    F_meas(c.matrix, relevant = "Yes"))
-  
-  pre.no = c(pre.no, precision(c.matrix, relevant = "No"))
-  rec.no = c(pre.no,    recall(c.matrix, relevant = "No"))
-  f1.no  = c(pre.no,    F_meas(c.matrix, relevant = "No"))
-}
-
-####################################################
-# Now let's build the data frame with the results
-# we consolidate the results by computing
-#  - mean 
-#  - confidence interval (error margin)
-# for each metric
-####################################################
-
-results1 = data.frame(
-  ci(pre.yes), 
-  ci(rec.yes), 
-  ci(f1.yes),
-  ci(pre.no), 
-  ci(rec.no), 
-  ci(f1.no)
-)
-
-results1 = data.frame(t(results),row.names=NULL)
-
-results1 = cbind(
-  Class=c(rep("Yes",3),rep("No",3)),
-  Metric=rep(c("Precision","Recall","F1"),2),
-  results)
-
-####################################################
-# Let's reorder the factor in column Metric
-# so they are plotted in the order Precision, Recall, F1
-# otherwise it will be the current (aphabetical) order
-####################################################
-
-results1$Metric = factor(results$Metric, levels = c("Precision", "Recall","F1"))
-
-
-
-####################################################
-##Repeat CV10F for second set of feautres
-####################################################
-
-####################################################
-# Precision, Recall and F1 null vectors for now
-####################################################
-
-pre.yes = 
-  rec.yes =
-  f1.yes  =
-  pre.no  =
-  rec.no  =
-  f1.no   = NULL
-
-####################################################
-# confusion matrix is initially empty as well
-####################################################
-
-c.matrix = NULL
-
-for(fold in Folds)
-{
-  training = train2_fold[fold,]
-  testing  = test2_fold[fold,]
-  ####################################################
-  # train the tree and fit the model
-  ####################################################
-  
-  the.tree = tree(y~., training)
-  cv.tree  = cv.tree(the.tree, FUN=prune.misclass)
-  index.best  = which.min(cv.tree$dev)
-  best.size   = cv.tree$size[index.best]
-  pruned.tree = prune.misclass(the.tree,best=best.size)
-  
-  ####################################################
-  # test the tree (predict)
-  ####################################################
-  
-  pred = predict(pruned.tree, testing, type="class")
-  
-  ####################################################
-  # update the confusion matrix
-  ####################################################
-  
-  c.matrix = table(pred, testing$y)
-  
-  ####################################################
-  # compute the performance metrics (Precision, recall, F1) for each class
-  # add to the proper vector that will be used
-  # later for consolidation
-  ####################################################
-  
-  pre.yes = c(pre.yes, precision(c.matrix, relevant = "Yes"))
-  rec.yes = c(pre.yes,    recall(c.matrix, relevant = "Yes"))
-  f1.yes  = c(pre.yes,    F_meas(c.matrix, relevant = "Yes"))
-  
-  pre.no = c(pre.no, precision(c.matrix, relevant = "No"))
-  rec.no = c(pre.no,    recall(c.matrix, relevant = "No"))
-  f1.no  = c(pre.no,    F_meas(c.matrix, relevant = "No"))
-}
-
-####################################################
-# Now let's build the data frame with the results
-# we consolidate the results by computing
-#  - mean 
-#  - confidence interval (error margin)
-# for each metric
-####################################################
-
-results2 = data.frame(
-  ci(pre.yes), 
-  ci(rec.yes), 
-  ci(f1.yes),
-  ci(pre.no), 
-  ci(rec.no), 
-  ci(f1.no)
-)
-
-results2 = data.frame(t(results),row.names=NULL)
-
-results2 = cbind(
-  Class=c(rep("Yes",3),rep("No",3)),
-  Metric=rep(c("Precision","Recall","F1"),2),
-  results)
-
-####################################################
-# Let's reorder the factor in column Metric
-# so they are plotted in the order Precision, Recall, F1
-# otherwise it will be the current (aphabetical) order
-####################################################
-
-results2$Metric = factor(results$Metric, levels = c("Precision", "Recall","F1"))
 
 ####################################################
 ####################################################
